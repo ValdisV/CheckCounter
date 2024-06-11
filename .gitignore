@@ -1,4 +1,6 @@
 /.venv
 /old.py
-/output
 /test.py
+/build
+/main.spec
+/__pycache__

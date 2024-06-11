@@ -1,12 +1,16 @@
 import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.filedialog as tk_filedialog
+import tkinter.messagebox as tk_messagebox
+import tkinterdnd2 as tk_dnd
 import os
 import PyPDF2
+import traceback as tb
 
 
 APP_NAME = "Money Generator $$$"
-__version__ = "1.0.0"
+__author__ = "ValdisV"
+__version__ = "1.1.0"
 
 
 def get_num_sum(old_sum, tag):
@@ -47,6 +51,7 @@ def get_maxima_check_data(file_path:str):
     next_deposite = False
     prev_product = None
     product_total_cost = 0
+    prev_new = False
 
     for product in product_check:
         if product == "Papildus depozīta maksa":
@@ -63,6 +68,16 @@ def get_maxima_check_data(file_path:str):
             products[prev_product]["discount"] = discount
 
         elif product.startswith("  "):  # gets cost, quantity, total cost and deposite cost
+
+            if prev_new:  # adds product to products list
+                if prev_product in products:
+                    num = 2
+                    while f"({num}) {prev_product}" in products: num += 1
+                    prev_product = f"({num}) {prev_product}"
+
+                products[prev_product] = {"tag": 0}
+                prev_new = False
+
             text = product.replace(" ", "")
             sep2 = len(text) - 5  # separates quantity from total cost
             while text[sep2 - 1].isnumeric(): sep2 -= 1
@@ -81,21 +96,20 @@ def get_maxima_check_data(file_path:str):
                 products[prev_product]["cost"] = cost
                 products[prev_product]["quantity"] = quantity
 
+        elif prev_new:  # product title is in multiple lines
+            prev_product += " " + product
+
         else:  # new product
-            if product in products:
-                num = 2
-                while f"({num}) {product}" in products: num += 1
-                product = f"({num}) {product}"
-            products[product] = {"tag": 0}
             prev_product = product
+            prev_new = True
 
     return product_total_cost, products
 
 
-class App(tk.Tk):
+class App(tk_dnd.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"{APP_NAME} - v.{__version__}")
+        self.title(f"{APP_NAME} - | v.{__version__} | - | Created by: {__author__} |")
 
         self.style = ttk.Style(self)
         self.style.configure("Treeview", rowheight=25)
@@ -141,6 +155,8 @@ class App(tk.Tk):
 
         self.file_tree = ttk.Treeview(self.file_tree_frame, selectmode="browse", columns=("cost", "procent", "total_cost"))
         self.file_tree.bind("<<TreeviewSelect>>", self.file_selected)
+        self.file_tree.drop_target_register(tk_dnd.DND_FILES)
+        self.file_tree.dnd_bind('<<Drop>>', self.add_files)
 
         self.file_tree.heading("#0", text="Name")
         self.file_tree.heading("cost", text="Cost")
@@ -223,26 +239,40 @@ class App(tk.Tk):
         self.profit_label.pack(side="left", padx=(5, 0))
 
     # ADD, REMOVE, SELECT FILES ----------------------------------------------
-    def add_files(self):
-        files = tk_filedialog.askopenfilenames(title="Select checks", filetypes=[("MAXIMA checks", ".pdf")])
+    def add_files(self, event=None):
+        if event is None:
+            files = tk_filedialog.askopenfilenames(title="Select checks", filetypes=[("MAXIMA checks", ".pdf")])
+        else:  # draged in files
+            files = (path for path in self.tk.splitlist(event.data) if os.path.splitext(path)[1] == ".pdf")
+        
         if not files: return
         for file_ in files:
             if file_ in self.all_checks: continue
-            total_cost, products = get_maxima_check_data(file_)
-            new_cost = get_num_sum(total_cost, 0)
             
+            try:
+                total_cost, products = get_maxima_check_data(file_)
+                new_cost = get_num_sum(total_cost, 0)
+                procent = get_procent(new_cost, total_cost)
+            except Exception as exc:
+                print(f" ERROR! - {file_} ".center(100, "-"))
+                print(tb.format_exc())
+                print()
+                tk_messagebox.showerror("Error!", f"Failed to load check!\n'{file_}'")
+                continue
+
             self.file_tree.insert("", "end", file_, text=os.path.basename(file_), tags=[0], values=(
-                int_to_float_str(get_num_sum(total_cost, 0)),
-                f"{get_procent(new_cost, total_cost)}%",
+                int_to_float_str(new_cost),
+                f"{procent}%",
                 int_to_float_str(total_cost)
             ))
-            self.final_cost += get_num_sum(total_cost, 0)
+            
+            self.final_cost += new_cost
             self.total_cost += total_cost
             self.all_check_data[file_] = {"old_cost": total_cost, "new_cost": new_cost}
             self.all_checks[file_] = products
         
         self.update_total_cost_data()
-        self.total_cost_label.config(text=f" / {int_to_float_str(self.total_cost)} EUR]")
+        self.total_cost_label.config(text=f" / Total: {int_to_float_str(self.total_cost)} EUR]")
 
     def remove_file(self):
         files = self.file_tree.selection()
@@ -257,7 +287,7 @@ class App(tk.Tk):
         self.clear_product_tree()
         self.file_tree.delete(*files)
         self.update_total_cost_data()
-        self.total_cost_label.config(text=f" / {int_to_float_str(self.total_cost)} EUR]")
+        self.total_cost_label.config(text=f" / Total: {int_to_float_str(self.total_cost)} EUR]")
 
     def file_selected(self, _=None):
         files = self.file_tree.selection()
@@ -339,7 +369,7 @@ class App(tk.Tk):
             ))
 
     def update_total_cost_data(self):
-        self.final_cost_label.config(text=f"[{int_to_float_str(self.final_cost)}")
+        self.final_cost_label.config(text=f"[Return: {int_to_float_str(self.final_cost)}")
         if self.total_cost != 0:
             procents = get_procent(self.final_cost, self.total_cost)
             color = "red" if procents < 48 else "green" if procents > 52 else "orange"
